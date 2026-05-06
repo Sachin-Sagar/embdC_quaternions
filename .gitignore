@@ -1,0 +1,26 @@
+# Build Artifacts
+*.o
+*.a
+*.so
+*.out
+build/
+
+# Executables
+tests/test_quat
+sim/simulation
+
+# IDE and System Files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# CMake (if used in the future)
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+!/Makefile # Keep the root Makefile we created
