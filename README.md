@@ -1,52 +1,64 @@
 # EmbdC Quaternions
 
-A lightweight, pure C library for quaternion-based coordinate transformations, featuring a 3D C++ simulation tool built with Raylib. This project is designed for embedded systems where sensor-to-body frame transformations (e.g., IMU mounting) are critical.
+A lightweight, high-performance, pure C library for quaternion-based coordinate transformations, featuring both floating-point and fixed-point implementations. This project is specifically optimized for embedded systems (e.g., STM32) where sensor-to-body frame transformations are critical.
 
 ## Features
-- **Pure C Math Library (`embdC_quat`):**
-    - High-performance Vector and Quaternion arithmetic.
+- **Optimized Floating-Point Implementation (`embdC_quat`):**
+    - Uses an optimized "sandwich product" for vector rotation: $v' = v + 2q_{xyz} \times (q_{xyz} \times v + w v)$, reducing operations by >50% compared to standard $q v q^{-1}$.
+    - Single-precision optimized for hardware FPUs (Cortex-M4F/M7).
     - ZYX Euler angle conversions (Roll, Pitch, Yaw).
-    - Sensor-to-Body coordinate transformation.
-    - Right-Handed Coordinate System support.
+- **Q30 Fixed-Point Implementation (`embdC_quat_fixed`):**
+    - High-precision `int32_t` arithmetic (Q30 format).
+    - Deterministic performance, ideal for systems without an FPU (Cortex-M0/M3).
+    - Minimal memory footprint.
+- **Sensor-to-Body Transformation:** Simplified API for transforming vectors from a sensor mounting frame to the vehicle body frame.
 - **C++ Simulation Tool:**
     - Real-time 3D visualization using Raylib.
-    - **Z-Up Orientation:** Follows standard aerospace and robotics conventions.
+    - Z-Up Orientation following aerospace and robotics conventions.
     - Interactive HUD showing real-time Euler and Quaternion data.
-    - Visual axis markers for World, Body, and Sensor frames.
-- **Testing:**
-    - Custom unit test suite to verify mathematical correctness.
+- **Testing:** Comprehensive unit test suite covering both floating and fixed-point math.
 
 ## Project Structure
 - `include/`: C API headers.
 - `src/`: Core library implementation (C).
 - `sim/`: Simulation tool source (C++).
 - `tests/`: Unit test suite.
-- `Makefile`: Unified build system.
+- `CMakeLists.txt`: Build configuration.
 
 ## Getting Started
 
 ### Prerequisites
 - **Compiler:** GCC (C11) and G++ (C++17).
-- **Build Tool:** Make.
+- **Build Tool:** CMake.
 - **Dependencies:** [Raylib](https://www.raylib.com/) (Required for simulation only).
-
-### Installation (Raylib on Linux)
-If Raylib is not in your package manager, build it from source:
-```bash
-sudo apt install libasound2-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libglu1-mesa-dev libxcursor-dev libxinerama-dev
-git clone --depth 1 https://github.com/raysan5/raylib.git
-cd raylib/src && make PLATFORM=PLATFORM_DESKTOP
-sudo make install
-```
 
 ### Building the Project
 ```bash
-# Build the library, tests, and simulation
+mkdir build && cd build
+cmake ..
 make
 
-# Run the math unit tests
-make test
+# Run the unit tests
+./tests/test_quat
+./tests/test_quat_fixed
 ```
+
+## Implementation Details
+
+### Floating-Point Optimization
+The library is designed to prevent implicit `double` promotion. All constants use the `f` suffix, and we avoid heavy standard library calls where possible. The vector rotation is implemented as:
+```c
+vec3_t q_x_v = vec3_cross(q_vec, v);
+vec3_t t = { 2.0f * q_x_v.x, 2.0f * q_x_v.y, 2.0f * q_x_v.z };
+v_prime = v + q.w * t + (q_vec x t);
+```
+
+### Fixed-Point (Q30)
+The fixed-point version uses a **Q30** format:
+- **1.0** is represented as `1 << 30`.
+- **Range:** $[-2, 2)$, perfect for unit quaternions.
+- **Precision:** $\approx 9.3 \times 10^{-10}$.
+- **Intermediate Math:** Uses `int64_t` for products to ensure zero overflow before the shift.
 
 ## Simulation Usage
 Run the visualization tool:
@@ -63,13 +75,5 @@ Run the visualization tool:
 | **R** | Reset Rotation |
 | **ESC** | Exit |
 
-### Visual Guide
-- **World Frame:** Static grid at $Z=0$.
-    - **Red:** X | **Green:** Y | **Blue:** Z (UP)
-- **Body Frame:** Large gray cuboid representing the vehicle.
-- **Sensor Frame:** Small orange box representing the IMU/Sensor.
-
-## Math Reference
-The library uses the **Hamilton product** for quaternion multiplication and performs vector rotation using:
-$$v' = q \cdot v \cdot q^{-1}$$
-For unit quaternions, this simplifies to using the conjugate for the inverse.
+## License
+MIT License

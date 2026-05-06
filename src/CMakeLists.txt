@@ -1,4 +1,7 @@
-add_library(embdC_quat STATIC embdC_quat.c)
+add_library(embdC_quat STATIC 
+    embdC_quat.c
+    embdC_quat_fixed.c
+)
 
 target_include_directories(embdC_quat PUBLIC 
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
