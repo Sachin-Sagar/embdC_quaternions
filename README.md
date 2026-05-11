@@ -66,14 +66,31 @@ Run the visualization tool:
 ./sim/simulation
 ```
 
-### Controls
-| Key | Action |
-|-----|--------|
-| **W / S** | Pitch Up / Down |
-| **A / D** | Yaw Left / Right |
-| **Q / E** | Roll Left / Right |
-| **R** | Reset Rotation |
-| **ESC** | Exit |
+The simulation features a **720p 3D Viewport** on the left and an **Interactive Sidebar** on the right.
+
+### Controls & Interaction
+- **3D Navigation:** Use the keyboard shortcuts listed in the sidebar to rotate the Body or move/rotate the IMU.
+- **Manual Input:** Click on any coordinate or angle box in the sidebar to type values directly. Press Backspace to edit. Click outside the box to deselect.
+- **Handedness Guarantee:** All transformations are quaternion-based, ensuring the resulting mapping is always right-handed.
+- **Export:** Press **P** to save the configuration and the 3x3 Rotation Matrix ($R_{s2b}$) to `imu_config.txt`.
+
+### Customization (Source Code)
+You can customize the simulation by modifying the configuration structures at the top of `sim/main.cpp`:
+
+#### 1. Graphics & Resolution (`GraphicsConfig`)
+- `renderWidth` / `renderHeight`: Change the size of the 3D viewport.
+- `msaaSamples`: Set to 0, 2, 4, or 8 to adjust Anti-Aliasing quality (default is 4).
+- `targetFPS`: Limit the frame rate.
+
+#### 2. Key Mappings (`ControlConfig`)
+- All keyboard shortcuts (e.g., `bodyPitchUp`, `imuPosXInc`, `saveConfig`) can be reassigned to any `KEY_` constant defined by Raylib.
+
+### IMU Calibration Workflow
+1.  **Mounting Alignment:** Align the orange virtual sensor with your physical mounting orientation using keyboard shortcuts or manual input.
+2.  **Matrix Export:** Press **P** to save.
+3.  **Implementation:** Copy the matrix from `imu_config.txt` into your firmware to transform raw data: $v_{body} = R_{s2b} \cdot v_{sensor}$.
+
+
 
 ## License
 MIT License

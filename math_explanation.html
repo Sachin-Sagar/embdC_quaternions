@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quaternion vs. Euler Rotation: Math & Optimizations</title>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            background-color: #f8f9fa;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+            border-bottom: 1px solid #dee2e6;
+            padding-bottom: 0.5rem;
+        }
+        .container {
+            background: white;
+            padding: 3rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        code {
+            background: #f1f3f5;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        }
+        .highlight {
+            background-color: #fff3bf;
+            padding: 1rem;
+            border-left: 4px solid #fab005;
+            margin: 1.5rem 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5rem 0;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+        th {
+            background-color: #f1f3f5;
+        }
+        .formula-box {
+            background: #e7f5ff;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Understanding Rotation Mathematics</h1>
+        <p>In embedded systems like drone flight controllers or robotics, representing 3D orientation accurately and efficiently is critical. We primarily use two methods: <strong>Euler Angles</strong> and <strong>Quaternions</strong>.</p>
+
+        <h2>1. Euler Angles</h2>
+        <p>Euler angles represent rotation as a sequence of three rotations around the axes of a coordinate system. A common convention is the ZYX sequence (Yaw, Pitch, Roll):</p>
+        <div class="formula-box">
+            \[ R = R_z(\psi) R_y(\theta) R_x(\phi) \]
+        </div>
+        <h3>The Pros</h3>
+        <ul>
+            <li><strong>Intuitive:</strong> Easy for humans to visualize (e.g., "turn 90 degrees left").</li>
+            <li><strong>Compact:</strong> Only 3 numbers required.</li>
+        </ul>
+        <h3>The Cons: Gimbal Lock</h3>
+        <p>When the pitch angle \(\theta\) reaches \(\pm 90^\circ\), the first and third axes align. This causes a "loss of a degree of freedom," where changing roll and yaw results in the same physical motion. Mathematically, the mapping from angular rates to orientation becomes singular.</p>
+
+        <h2>2. Quaternions</h2>
+        <p>A quaternion is a four-dimensional complex number used to represent rotations in 3D space. It is defined as:</p>
+        <div class="formula-box">
+            \[ \mathbf{q} = w + xi + yj + zk \]
+            \[ \text{where } i^2 = j^2 = k^2 = ijk = -1 \]
+        </div>
+        <p>For a rotation of angle \(\theta\) around a unit axis \(\vec{u} = (u_x, u_y, u_z)\), the unit quaternion is:</p>
+        <div class="formula-box">
+            \[ \mathbf{q} = \left( \cos\frac{\theta}{2}, u_x\sin\frac{\theta}{2}, u_y\sin\frac{\theta}{2}, u_z\sin\frac{\theta}{2} \right) \]
+        </div>
+
+        <h3>The Rotation Formula</h3>
+        <p>To rotate a vector \(\vec{v}\), we treat it as a pure quaternion \(\mathbf{v} = (0, v_x, v_y, v_z)\) and calculate the sandwich product:</p>
+        <div class="formula-box">
+            \[ \mathbf{v}' = \mathbf{q} \mathbf{v} \mathbf{q}^{-1} \]
+        </div>
+
+        <h2>3. Implementation in C</h2>
+        <p>The library is designed for spatial locality and computational efficiency, ensuring that the hardware can process vectors and quaternions at maximum speed.</p>
+
+        <h3>A. Memory Layout & Data Structures</h3>
+        <p>We use simple structures to ensure that components are stored contiguously in memory. This allows the compiler to use "Load Multiple" (LDM) and "Store Multiple" (STM) instructions, which are highly efficient on ARM architectures.</p>
+        <div class="formula-box" style="text-align: left; font-family: monospace; background: #f8f9fa;">
+            typedef struct { float x; float y; float z; } vec3_t;<br>
+            typedef struct { float w; float x; float y; float z; } quat_t;
+        </div>
+
+        <h3>B. Quaternion Multiplication (Hamilton Product)</h3>
+        <p>Combining two rotations is equivalent to multiplying their quaternions. This is implemented as a 4D complex product:</p>
+        <div class="formula-box" style="text-align: left; font-family: monospace; background: #f8f9fa;">
+            w = q1.w*q2.w - q1.x*q2.x - q1.y*q2.y - q1.z*q2.z;<br>
+            x = q1.w*q2.x + q1.x*q2.w + q1.y*q2.z - q1.z*q2.y;<br>
+            y = q1.w*q2.y - q1.x*q2.z + q1.y*q2.w + q1.z*q2.x;<br>
+            z = q1.w*q2.z + q1.x*q2.y - q1.y*q2.x + q1.z*q2.w;
+        </div>
+
+        <h2>4. Comparison Table</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Euler Angles</th>
+                    <th>Quaternions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Storage</td>
+                    <td>3 Scalars</td>
+                    <td>4 Scalars</td>
+                </tr>
+                <tr>
+                    <td>Gimbal Lock</td>
+                    <td>Yes (at poles)</td>
+                    <td>No (Continuous)</td>
+                </tr>
+                <tr>
+                    <td>Interpolation</td>
+                    <td>Difficult/Non-linear</td>
+                    <td>Smooth (SLERP)</td>
+                </tr>
+                <tr>
+                    <td>Efficiency</td>
+                    <td>High (Trig heavy)</td>
+                    <td>Very High (Algebraic)</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>4. Real-Time Optimizations for 32-bit MCUs</h2>
+        <p>To run these calculations real-time on an STM32 (Cortex-M4/M7), several optimizations were implemented in this library:</p>
+
+        <h3>A. The Optimized Sandwich Product</h3>
+        <p>The standard \(\mathbf{q}\mathbf{v}\mathbf{q}^{-1}\) requires 24 multiplications and 17 additions. We use an optimized vector-based formula:</p>
+        <div class="formula-box">
+            \[ \vec{v}' = \vec{v} + 2\vec{q}_{xyz} \times (\vec{q}_{xyz} \times \vec{v} + w\vec{v}) \]
+        </div>
+        <p>This reduces the computational load significantly by utilizing the cross product, which is very efficient on 32-bit registers.</p>
+
+        <h3>B. Avoiding Double-Precision Promotion</h3>
+        <p>Most STM32 chips (Cortex-M4F) have a <strong>Single-Precision FPU</strong>. In C, <code>2.0</code> is a <code>double</code>. Using it forces the MCU to simulate double-precision in software, which is 10-100x slower. We strictly use:</p>
+        <ul>
+            <li><code>float</code> literals: <code>2.0f</code></li>
+            <li>Single-precision functions: <code>sqrtf()</code>, <code>sinf()</code>, <code>cosf()</code></li>
+        </ul>
+
+        <h3>C. Q30 Fixed-Point Arithmetic</h3>
+        <p>For chips without an FPU (Cortex-M0/M3) or for maximum determinism, we implemented <strong>Q30 Fixed-Point</strong>. This achieves floating-point results using only integer operations by scaling the continuous real-number space.</p>
+        
+        <h4>1. The Scaling Factor</h4>
+        <p>In Q30 format, the value \(1.0\) is represented as \(2^{30}\) (\(1,073,741,824\)). This provides a resolution of approximately \(9.3 \times 10^{-10}\), which is actually higher than the precision of a standard 32-bit <code>float</code>.</p>
+
+        <h4>2. Mathematical Emulation</h4>
+        <p>Multiplying two scaled integers doubles the scaling factor (\(2^{30} \times 2^{30} = 2^{60}\)). To return to Q30 space, we must shift the result:</p>
+        <div class="formula-box" style="text-align: left; font-family: monospace; background: #f8f9fa;">
+            static inline q30_t q30_mul(q30_t a, q30_t b) {<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;return (q30_t)(((int64_t)a * b) >> 30);<br>
+            }
+        </div>
+        <p>By using a 64-bit intermediate (<code>int64_t</code>), we ensure no data is lost during the multiplication before the shift.</p>
+
+        <h4>3. Comparison of Accuracy</h4>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Floating Point (float)</th>
+                    <th>Fixed Point (Q30)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Storage</td>
+                    <td>32-bit (IEEE 754)</td>
+                    <td>32-bit (Two's Complement)</td>
+                </tr>
+                <tr>
+                    <td>Precision</td>
+                    <td>Variable (~7 digits)</td>
+                    <td>Constant (~9 digits)</td>
+                </tr>
+                <tr>
+                    <td>Dynamic Range</td>
+                    <td>\(10^{-38}\) to \(10^{38}\)</td>
+                    <td>\([-2, 2)\)</td>
+                </tr>
+            </tbody>
+        </table>
+        <p>Since quaternions and normalized vectors are bounded between -1 and 1, the Q30 format provides superior precision for this specific application while significantly increasing execution speed.</p>
+
+        <div class="highlight">
+            <strong>Conclusion:</strong> While Euler angles are better for UI display, Quaternions are the mathematically superior choice for internal estimation and control loops, especially when optimized for the underlying hardware architecture.
+        </div>
+
+        <h2>5. Sensor-to-Body Transformation & Calibration</h2>
+        <p>In real-world applications, the IMU is rarely aligned perfectly with the vehicle's body axes. We must transform the sensor's local readings \(\vec{v}_{sensor}\) into the vehicle's body frame \(\vec{v}_{body}\).</p>
+
+        <h3>A. The Rotation Matrix (\(R_{s2b}\))</h3>
+        <p>The relationship between the sensor and body frames is defined by a 3x3 rotation matrix:</p>
+        <div class="formula-box">
+            \[ \vec{v}_{body} = R_{s2b} \cdot \vec{v}_{sensor} \]
+        </div>
+        <p>For a valid coordinate transformation, \(R_{s2b}\) must be an <strong>Orthogonal Matrix</strong> with a determinant of <strong>+1</strong>. This ensures that the transformation is a pure rotation and does not involve reflection.</p>
+
+        <h3>B. Guaranteeing Right-Handedness</h3>
+        <p>A common mistake in IMU calibration is manually "swapping" axes (e.g., \(z_{body} = y_{sensor}\)). If this swap is not carefully chosen, it can result in a <strong>Left-Handed</strong> coordinate system (\(\det(R) = -1\)).</p>
+        <ul>
+            <li><strong>Accelerometer Impact:</strong> Vector signs are flipped, causing incorrect tilt estimation.</li>
+            <li><strong>Gyroscope Impact:</strong> Rotational logic is inverted. A positive rotation around the sensor axis becomes a negative rotation in the body frame, causing feedback loops (like PID controllers) to diverge and fail.</li>
+        </ul>
+        <p>By using <strong>Quaternions</strong> to derive the rotation matrix, right-handedness is mathematically guaranteed. A unit quaternion always represents a valid rotation in \(SO(3)\).</p>
+
+        <h3>C. Using the Simulation as a Calibration Rig</h3>
+        <p>The provided simulation tool allows for empirical identification of the \(R_{s2b}\) matrix:</p>
+        <ol>
+            <li><strong>Visual Alignment:</strong> Align the virtual "Sensor" box with the physical mounting on your vehicle using the keyboard controls.</li>
+            <li><strong>Matrix Generation:</strong> The tool calculates the 3x3 matrix by rotating the unit basis vectors \(\hat{i}, \hat{j}, \hat{k}\) through the mounting quaternion.</li>
+            <li><strong>Export:</strong> Saving the configuration generates a text file with the precise matrix coefficients needed for your firmware's "Rough Calibration" layer.</li>
+        </ol>
+    </div>
+</body>
+</html>
+
