@@ -1,13 +1,24 @@
-# Build Artifacts
+# Build and Artifacts
+build/
+bin/
+lib/
 *.o
 *.a
 *.so
 *.out
-build/
 
-# Executables
-tests/test_quat
-sim/simulation
+# Project Specific
+imu_config.txt
+raylib/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+_deps/
 
 # IDE and System Files
 .vscode/
@@ -15,12 +26,4 @@ sim/simulation
 *.swp
 *.swo
 .DS_Store
-
-# CMake (if used in the future)
-CMakeCache.txt
-CMakeFiles/
-CMakeScripts/
-cmake_install.cmake
-install_manifest.txt
-Makefile
-!/Makefile # Keep the root Makefile we created
+.history/

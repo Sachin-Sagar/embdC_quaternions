@@ -8,12 +8,13 @@
 #include <fstream>
 #include <sstream>
 
-// Global font for better readability
+// Global font and scale for better readability
 Font mainFont;
+float uiScale = 1.0f;
 
 // Helper to draw text using our high-quality font
 void MyDrawText(const char* text, float x, float y, float fontSize, Color color) {
-    DrawTextEx(mainFont, text, {x, y}, fontSize, 1.0f, color);
+    DrawTextEx(mainFont, text, {x, y}, fontSize * uiScale, 1.0f, color);
 }
 
 // Helper to convert embdC_quat types to Raylib types
@@ -88,11 +89,11 @@ struct InputBox {
     void Draw() {
         DrawRectangleRec(rect, active ? LIGHTGRAY : WHITE);
         DrawRectangleLinesEx(rect, 1, active ? BLUE : DARKGRAY);
-        MyDrawText(label.c_str(), rect.x, rect.y - 18, 16, BLACK);
-        MyDrawText(text.c_str(), rect.x + 5, rect.y + 5, 20, BLACK);
+        MyDrawText(label.c_str(), rect.x, rect.y - (18 * uiScale), 16, BLACK);
+        MyDrawText(text.c_str(), rect.x + (5 * uiScale), rect.y + (5 * uiScale), 20, BLACK);
         if (active && (int)(GetTime() * 2) % 2 == 0) {
-            float width = MeasureTextEx(mainFont, text.c_str(), 20, 1.0f).x;
-            MyDrawText("|", rect.x + 8 + width, rect.y + 5, 20, BLACK);
+            float width = MeasureTextEx(mainFont, text.c_str(), 20 * uiScale, 1.0f).x;
+            MyDrawText("|", rect.x + (8 * uiScale) + width, rect.y + (5 * uiScale), 20, BLACK);
         }
     }
 
@@ -113,10 +114,10 @@ struct InputBox {
  * Adjust these values to change the simulation resolution and appearance.
  */
 struct GraphicsConfig {
-    int renderWidth  = 1280; // Width of the 3D simulation area
-    int renderHeight = 720;  // Height of the simulation (720p)
-    int sidebarWidth = 400;  // Width of the controls sidebar
-    int msaaSamples  = 4;    // Anti-aliasing (0, 2, 4, 8). Fixes "blocky" edges.
+    int renderWidth  = 800;  // Width of the 3D simulation area
+    int renderHeight = 600;  // Height of the simulation
+    int sidebarWidth = 300;  // Width of the controls sidebar
+    int msaaSamples  = 0;    // Anti-aliasing (Disabled)
     int targetFPS    = 60;   // Frame rate limit
 } config;
 
@@ -156,18 +157,39 @@ struct ControlConfig {
 } keys;
 
 int main() {
+    // --- RASPBERRY PI SAFE MODE CONFIGURATION ---
     const int screenWidth = config.renderWidth + config.sidebarWidth;
     const int screenHeight = config.renderHeight;
+    
+    // Calculate UI scale based on height (baseline is 720p)
+    uiScale = (float)screenHeight / 720.0f;
+    if (uiScale < 0.7f) uiScale = 0.7f; // Minimum scale to keep text readable
 
-    // Enable Anti-Aliasing (MSAA) before window initialization
-    if (config.msaaSamples > 0) {
-        SetConfigFlags(FLAG_MSAA_4X_HINT); 
+    // We explicitly avoid calling SetConfigFlags here.
+    // On some Pi setups, even hinting at MSAA or high-DPI can cause GLX to fail.
+    
+    InitWindow(screenWidth, screenHeight, "EmbdC Quaternions - Pi Calibration");
+
+    if (!IsWindowReady()) {
+        std::cerr << "CRITICAL: Raylib failed to initialize the window." << std::endl;
+        std::cerr << "On Raspberry Pi, ensure you have the 'Full KMS' driver enabled in raspi-config." << std::endl;
+        return -1;
     }
 
-    InitWindow(screenWidth, screenHeight, "EmbdC Quaternions - Sidebar Config");
+    // Load Font with multiple fallbacks
+    const char* fontPaths[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+    };
 
-    // Load High Quality Font
-    mainFont = LoadFontEx("/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf", 32, 0, 250);
+    mainFont = GetFontDefault(); // Default fallback
+    for (const char* path : fontPaths) {
+        if (FileExists(path)) {
+            mainFont = LoadFontEx(path, 32, 0, 250);
+            break;
+        }
+    }
     SetTextureFilter(mainFont.texture, TEXTURE_FILTER_BILINEAR);
 
     Camera3D camera = { 0 };
@@ -187,13 +209,13 @@ int main() {
 
     // Initialize Input Boxes
     std::vector<InputBox> inputs;
-    float startX = config.renderWidth + 40;
-    float startY = 280; 
-    float spacing = 55;  
+    float startX = config.renderWidth + (40 * uiScale);
+    float startY = 280 * uiScale; 
+    float spacing = 55 * uiScale;  
 
     const char* labels[] = {"Pos X", "Pos Y", "Pos Z", "Roll [deg]", "Pitch [deg]", "Yaw [deg]"};
     for (int i = 0; i < 6; i++) {
-        inputs.push_back({{startX, startY + i * spacing, 140, 35}, "", labels[i], false, 10});
+        inputs.push_back({{startX, startY + i * spacing, 140 * uiScale, 35 * uiScale}, "", labels[i], false, 10});
     }
 
     inputs[0].SetValue(imu_pos.x); inputs[1].SetValue(imu_pos.y); inputs[2].SetValue(imu_pos.z);
@@ -290,33 +312,33 @@ int main() {
             DrawRectangle(config.renderWidth, 0, config.sidebarWidth, screenHeight, Fade(SKYBLUE, 0.1f));
             DrawLine(config.renderWidth, 0, config.renderWidth, screenHeight, BLUE);
 
-            float xPos = config.renderWidth + 20;
-            float yPos = 20;
+            float xPos = config.renderWidth + (20 * uiScale);
+            float yPos = 20 * uiScale;
             MyDrawText("IMU CALIBRATION RIG", xPos, yPos, 24, DARKBLUE);
 
-            yPos += 40;
+            yPos += 40 * uiScale;
             MyDrawText("BODY EULER [deg]:", xPos, yPos, 18, BLACK);
-            MyDrawText(TextFormat("R:%.1f, P:%.1f, Y:%.1f", current_euler.roll*RAD2DEG, current_euler.pitch*RAD2DEG, current_euler.yaw*RAD2DEG), xPos + 10, yPos += 22, 20, DARKGRAY);
+            MyDrawText(TextFormat("R:%.1f, P:%.1f, Y:%.1f", current_euler.roll*RAD2DEG, current_euler.pitch*RAD2DEG, current_euler.yaw*RAD2DEG), xPos + (10 * uiScale), yPos += (22 * uiScale), 20, DARKGRAY);
 
-            yPos += 30;
+            yPos += 30 * uiScale;
             MyDrawText("KEYBOARD SHORTCUTS:", xPos, yPos, 18, BLACK);
-            MyDrawText("- Move IMU: I/K, J/L, U/O", xPos + 10, yPos += 20, 16, DARKGRAY);
-            MyDrawText("- Rotate IMU: T/G, F/H, V/B", xPos + 10, yPos += 20, 16, DARKGRAY);
-            MyDrawText("- Body: W/S, A/D, Q/E", xPos + 10, yPos += 20, 16, DARKGRAY);
-            MyDrawText("- [P] Save | [C] Load | [R] Reset", xPos + 10, yPos += 20, 16, MAROON);
+            MyDrawText("- Move IMU: I/K, J/L, U/O", xPos + (10 * uiScale), yPos += (20 * uiScale), 16, DARKGRAY);
+            MyDrawText("- Rotate IMU: T/G, F/H, V/B", xPos + (10 * uiScale), yPos += (20 * uiScale), 16, DARKGRAY);
+            MyDrawText("- Body: W/S, A/D, Q/E", xPos + (10 * uiScale), yPos += (20 * uiScale), 16, DARKGRAY);
+            MyDrawText("- [P] Save | [C] Load | [R] Reset", xPos + (10 * uiScale), yPos += (20 * uiScale), 16, MAROON);
 
-            yPos += 30;
+            yPos += 30 * uiScale;
             MyDrawText("MANUAL IMU CONFIGURATION:", xPos, yPos, 18, BLACK);
             for (auto& input : inputs) { input.Draw(); }
 
-            yPos = 600; 
+            yPos = screenHeight - (100 * uiScale); 
             MyDrawText("SENSOR-TO-BODY MATRIX:", xPos, yPos, 18, MAROON);
             vec3_t c0 = quat_rotate_vec3(sensor_to_body, {1, 0, 0});
             vec3_t c1 = quat_rotate_vec3(sensor_to_body, {0, 1, 0});
             vec3_t c2 = quat_rotate_vec3(sensor_to_body, {0, 0, 1});
-            MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", c0.x, c1.x, c2.x), xPos + 10, yPos += 25, 20, BLACK);
-            MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", c0.y, c1.y, c2.y), xPos + 10, yPos += 25, 20, BLACK);
-            MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", c0.z, c1.z, c2.z), xPos + 10, yPos += 25, 20, BLACK);
+            MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", c0.x, c1.x, c2.x), xPos + (10 * uiScale), yPos += (25 * uiScale), 20, BLACK);
+            MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", c0.y, c1.y, c2.y), xPos + (10 * uiScale), yPos += (25 * uiScale), 20, BLACK);
+            MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", c0.z, c1.z, c2.z), xPos + (10 * uiScale), yPos += (25 * uiScale), 20, BLACK);
 
         EndDrawing();
     }

@@ -10,43 +10,82 @@ A lightweight, high-performance, pure C library for quaternion-based coordinate 
 - **Q30 Fixed-Point Implementation (`embdC_quat_fixed`):**
     - High-precision `int32_t` arithmetic (Q30 format).
     - Deterministic performance, ideal for systems without an FPU (Cortex-M0/M3).
-    - Minimal memory footprint.
 - **Sensor-to-Body Transformation:** Simplified API for transforming vectors from a sensor mounting frame to the vehicle body frame.
 - **C++ Simulation Tool:**
-    - Real-time 3D visualization using Raylib.
-    - Z-Up Orientation following aerospace and robotics conventions.
-    - Interactive HUD showing real-time Euler and Quaternion data.
-- **Testing:** Comprehensive unit test suite covering both floating and fixed-point math.
+    - Real-time 3D visualization using Raylib (Native OpenGL 2.1/ES support).
+    - **Dynamic UI Scaling:** UI automatically scales based on window resolution.
+    - Interactive HUD for real-time Euler and Quaternion data.
+- **Testing:** Comprehensive unit test suite using Google Test.
 
 ## Project Structure
 - `include/`: C API headers.
 - `src/`: Core library implementation (C).
 - `sim/`: Simulation tool source (C++).
 - `tests/`: Unit test suite.
-- `CMakeLists.txt`: Build configuration.
 
 ## Getting Started
 
 ### Prerequisites
 - **Compiler:** GCC (C11) and G++ (C++17).
-- **Build Tool:** CMake.
-- **Dependencies:** [Raylib](https://www.raylib.com/) (Required for simulation only).
+- **Build Tool:** CMake (>= 3.10).
+- **Dependencies (Linux/Debian):**
+  ```bash
+  sudo apt update
+  sudo apt install build-essential cmake git mesa-utils
+  # Required for simulation tool:
+  sudo apt install libasound2-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libglu1-mesa-dev
+  ```
 
 ### Building the Project
+By default, the simulation is disabled to ensure fast builds on low-power devices (like Raspberry Pi).
+
 ```bash
 mkdir build && cd build
 cmake ..
 make
-
-# Run the unit tests
-./tests/test_quat
-./tests/test_quat_fixed
 ```
+
+To build with the **3D Simulation tool**:
+```bash
+cmake .. -DBUILD_SIMULATION=ON
+make
+```
+
+### Running the Unit Tests
+```bash
+./tests/test_quat        # Floating-point tests
+./tests/test_quat_fixed  # Fixed-point tests
+```
+
+## Simulation Usage
+
+### Raspberry Pi 4 Optimization
+For the best experience on a Raspberry Pi 4, it is highly recommended to install Raylib globally using **OpenGL 2.1**:
+
+```bash
+git clone https://github.com/raysan5/raylib.git
+cd raylib/build
+cmake -DPLATFORM=Desktop -DGRAPHICS=GRAPHICS_API_OPENGL_21 -DBUILD_EXAMPLES=OFF ..
+make -j$(nproc)
+sudo make install
+```
+
+### Running the Tool
+```bash
+./sim/simulation
+```
+*If running over SSH on a Pi with a monitor attached: `DISPLAY=:0 ./sim/simulation`*
+
+### Troubleshooting (Raspberry Pi)
+If you see `GLXBadFBConfig`:
+1. Ensure **Full KMS** is enabled in `sudo raspi-config` (Advanced Options -> GL Driver).
+2. Increase GPU Memory to at least 128MB in `/boot/config.txt`.
+3. Force OpenGL version: `MESA_GL_VERSION_OVERRIDE=2.1 ./sim/simulation`
 
 ## Implementation Details
 
 ### Floating-Point Optimization
-The library is designed to prevent implicit `double` promotion. All constants use the `f` suffix, and we avoid heavy standard library calls where possible. The vector rotation is implemented as:
+Vector rotation is implemented using an optimized formula that avoids full quaternion multiplication:
 ```c
 vec3_t q_x_v = vec3_cross(q_vec, v);
 vec3_t t = { 2.0f * q_x_v.x, 2.0f * q_x_v.y, 2.0f * q_x_v.z };
@@ -54,43 +93,8 @@ v_prime = v + q.w * t + (q_vec x t);
 ```
 
 ### Fixed-Point (Q30)
-The fixed-point version uses a **Q30** format:
 - **1.0** is represented as `1 << 30`.
-- **Range:** $[-2, 2)$, perfect for unit quaternions.
-- **Precision:** $\approx 9.3 \times 10^{-10}$.
 - **Intermediate Math:** Uses `int64_t` for products to ensure zero overflow before the shift.
-
-## Simulation Usage
-Run the visualization tool:
-```bash
-./sim/simulation
-```
-
-The simulation features a **720p 3D Viewport** on the left and an **Interactive Sidebar** on the right.
-
-### Controls & Interaction
-- **3D Navigation:** Use the keyboard shortcuts listed in the sidebar to rotate the Body or move/rotate the IMU.
-- **Manual Input:** Click on any coordinate or angle box in the sidebar to type values directly. Press Backspace to edit. Click outside the box to deselect.
-- **Handedness Guarantee:** All transformations are quaternion-based, ensuring the resulting mapping is always right-handed.
-- **Export:** Press **P** to save the configuration and the 3x3 Rotation Matrix ($R_{s2b}$) to `imu_config.txt`.
-
-### Customization (Source Code)
-You can customize the simulation by modifying the configuration structures at the top of `sim/main.cpp`:
-
-#### 1. Graphics & Resolution (`GraphicsConfig`)
-- `renderWidth` / `renderHeight`: Change the size of the 3D viewport.
-- `msaaSamples`: Set to 0, 2, 4, or 8 to adjust Anti-Aliasing quality (default is 4).
-- `targetFPS`: Limit the frame rate.
-
-#### 2. Key Mappings (`ControlConfig`)
-- All keyboard shortcuts (e.g., `bodyPitchUp`, `imuPosXInc`, `saveConfig`) can be reassigned to any `KEY_` constant defined by Raylib.
-
-### IMU Calibration Workflow
-1.  **Mounting Alignment:** Align the orange virtual sensor with your physical mounting orientation using keyboard shortcuts or manual input.
-2.  **Matrix Export:** Press **P** to save.
-3.  **Implementation:** Copy the matrix from `imu_config.txt` into your firmware to transform raw data: $v_{body} = R_{s2b} \cdot v_{sensor}$.
-
-
 
 ## License
 MIT License
