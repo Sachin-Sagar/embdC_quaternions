@@ -38,7 +38,7 @@ void SaveConfig(vec3_t pos, euler_t euler) {
         vec3_t c1 = quat_rotate_vec3(q, {0, 1, 0});
         vec3_t c2 = quat_rotate_vec3(q, {0, 0, 1});
 
-        file << "\n# Sensor-to-Body Rotation Matrix (R_s2b):\n";
+        file << "\n# Final Sensor-to-Body Rotation Matrix (R_s2b):\n";
         file << "# Row 1: " << c0.x << " " << c1.x << " " << c2.x << "\n";
         file << "# Row 2: " << c0.y << " " << c1.y << " " << c2.y << "\n";
         file << "# Row 3: " << c0.z << " " << c1.z << " " << c2.z << "\n";
@@ -89,11 +89,11 @@ struct InputBox {
     void Draw() {
         DrawRectangleRec(rect, active ? LIGHTGRAY : WHITE);
         DrawRectangleLinesEx(rect, 1, active ? BLUE : DARKGRAY);
-        MyDrawText(label.c_str(), rect.x, rect.y - (18 * uiScale), 16, BLACK);
-        MyDrawText(text.c_str(), rect.x + (5 * uiScale), rect.y + (5 * uiScale), 20, BLACK);
+        MyDrawText(label.c_str(), rect.x, rect.y - (14 * uiScale), 13, DARKGRAY);
+        MyDrawText(text.c_str(), rect.x + (5 * uiScale), rect.y + (5 * uiScale), 18, BLACK);
         if (active && (int)(GetTime() * 2) % 2 == 0) {
-            float width = MeasureTextEx(mainFont, text.c_str(), 20 * uiScale, 1.0f).x;
-            MyDrawText("|", rect.x + (8 * uiScale) + width, rect.y + (5 * uiScale), 20, BLACK);
+            float width = MeasureTextEx(mainFont, text.c_str(), 18 * uiScale, 1.0f).x;
+            MyDrawText("|", rect.x + (8 * uiScale) + width, rect.y + (5 * uiScale), 18, BLACK);
         }
     }
 
@@ -207,15 +207,21 @@ int main() {
 
     LoadConfig(imu_pos, imu_euler);
 
-    // Initialize Input Boxes
+    // Initialize Input Boxes (Compact Grid Layout: 2 rows of 3)
     std::vector<InputBox> inputs;
-    float startX = config.renderWidth + (40 * uiScale);
-    float startY = 280 * uiScale; 
-    float spacing = 55 * uiScale;  
+    float startX = config.renderWidth + (15 * uiScale);
+    float startY = 247 * uiScale; 
+    float boxWidth = 80 * uiScale;
+    float boxHeight = 30 * uiScale;
+    float spacingX = 90 * uiScale;
+    float spacingY = 50 * uiScale;
 
     const char* labels[] = {"Pos X", "Pos Y", "Pos Z", "Roll [deg]", "Pitch [deg]", "Yaw [deg]"};
-    for (int i = 0; i < 6; i++) {
-        inputs.push_back({{startX, startY + i * spacing, 140 * uiScale, 35 * uiScale}, "", labels[i], false, 10});
+    for (int row = 0; row < 2; row++) {
+        for (int col = 0; col < 3; col++) {
+            int i = row * 3 + col;
+            inputs.push_back({{startX + col * spacingX, startY + row * spacingY, boxWidth, boxHeight}, "", labels[i], false, 10});
+        }
     }
 
     inputs[0].SetValue(imu_pos.x); inputs[1].SetValue(imu_pos.y); inputs[2].SetValue(imu_pos.z);
@@ -276,6 +282,29 @@ int main() {
         quat_t body_quat = quat_from_euler(current_euler);
         quat_t sensor_to_body = quat_from_euler(imu_euler);
 
+        // --- AUTOMATIC DECOMPOSITION ---
+        vec3_t c0 = quat_rotate_vec3(sensor_to_body, {1, 0, 0});
+        vec3_t c1 = quat_rotate_vec3(sensor_to_body, {0, 1, 0});
+        vec3_t c2 = quat_rotate_vec3(sensor_to_body, {0, 0, 1});
+
+        auto GetRoughAxis = [](vec3_t v) {
+            vec3_t r = {0,0,0};
+            if (fabsf(v.x) >= fabsf(v.y) && fabsf(v.x) >= fabsf(v.z)) r.x = (v.x > 0) ? 1.0f : -1.0f;
+            else if (fabsf(v.y) >= fabsf(v.z)) r.y = (v.y > 0) ? 1.0f : -1.0f;
+            else r.z = (v.z > 0) ? 1.0f : -1.0f;
+            return r;
+        };
+
+        vec3_t r0 = GetRoughAxis(c0);
+        vec3_t c1_fix = c1; 
+        if (r0.x != 0) c1_fix.x = 0; else if (r0.y != 0) c1_fix.y = 0; else c1_fix.z = 0;
+        vec3_t r1 = GetRoughAxis(c1_fix);
+        vec3_t r2 = vec3_cross(r0, r1);
+
+        vec3_t p0 = { vec3_dot(r0, c0), vec3_dot(r0, c1), vec3_dot(r0, c2) };
+        vec3_t p1 = { vec3_dot(r1, c0), vec3_dot(r1, c1), vec3_dot(r1, c2) };
+        vec3_t p2 = { vec3_dot(r2, c0), vec3_dot(r2, c1), vec3_dot(r2, c2) };
+
         BeginDrawing();
             ClearBackground(RAYWHITE);
 
@@ -327,18 +356,24 @@ int main() {
             MyDrawText("- Body: W/S, A/D, Q/E", xPos + (10 * uiScale), yPos += (20 * uiScale), 16, DARKGRAY);
             MyDrawText("- [P] Save | [C] Load | [R] Reset", xPos + (10 * uiScale), yPos += (20 * uiScale), 16, MAROON);
 
-            yPos += 30 * uiScale;
-            MyDrawText("MANUAL IMU CONFIGURATION:", xPos, yPos, 18, BLACK);
+            yPos += 25 * uiScale;
+            MyDrawText("FINAL MOUNTING ORIENTATION:", xPos, yPos, 18, BLACK);
+            yPos += 30 * uiScale; // Increased from 20 to prevent label overlap
             for (auto& input : inputs) { input.Draw(); }
 
-            yPos = screenHeight - (100 * uiScale); 
-            MyDrawText("SENSOR-TO-BODY MATRIX:", xPos, yPos, 18, MAROON);
-            vec3_t c0 = quat_rotate_vec3(sensor_to_body, {1, 0, 0});
-            vec3_t c1 = quat_rotate_vec3(sensor_to_body, {0, 1, 0});
-            vec3_t c2 = quat_rotate_vec3(sensor_to_body, {0, 0, 1});
-            MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", c0.x, c1.x, c2.x), xPos + (10 * uiScale), yPos += (25 * uiScale), 20, BLACK);
-            MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", c0.y, c1.y, c2.y), xPos + (10 * uiScale), yPos += (25 * uiScale), 20, BLACK);
-            MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", c0.z, c1.z, c2.z), xPos + (10 * uiScale), yPos += (25 * uiScale), 20, BLACK);
+            yPos = screenHeight - (245 * uiScale); 
+            MyDrawText("CALIBRATION DECOMPOSITION:", xPos, yPos, 18, MAROON);
+            
+            auto DrawMat = [&](vec3_t v0, vec3_t v1, vec3_t v2, const char* label, float& yp) {
+                MyDrawText(label, xPos + (5 * uiScale), yp += (22 * uiScale), 15, DARKBLUE);
+                MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", v0.x, v1.x, v2.x), xPos + (10 * uiScale), yp += (20 * uiScale), 18, BLACK);
+                MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", v0.y, v1.y, v2.y), xPos + (10 * uiScale), yp += (18 * uiScale), 18, BLACK);
+                MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", v0.z, v1.z, v2.z), xPos + (10 * uiScale), yp += (18 * uiScale), 18, BLACK);
+            };
+
+            DrawMat(r0, r1, r2, "R_rough (Cardinal Alignment):", yPos);
+            DrawMat(p0, p1, p2, "R_precise (Residual Error):", yPos);
+            DrawMat(c0, c1, c2, "R_final (Total Mounting):", yPos);
 
         EndDrawing();
     }
