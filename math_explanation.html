@@ -216,29 +216,102 @@
         <h2>5. Sensor-to-Body Transformation & Calibration</h2>
         <p>In real-world applications, the IMU is rarely aligned perfectly with the vehicle's body axes. We must transform the sensor's local readings \(\vec{v}_{sensor}\) into the vehicle's body frame \(\vec{v}_{body}\).</p>
 
-        <h3>A. The Rotation Matrix (\(R_{s2b}\))</h3>
-        <p>The relationship between the sensor and body frames is defined by a 3x3 rotation matrix:</p>
+        <h3>A. Basis Vector Extraction</h3>
+        <p>The core of the calibration logic is determining the orientation of the sensor frame's unit axes relative to the body frame. We rotate the three basis vectors \(\hat{i}, \hat{j}, \hat{k}\) of the sensor frame using the current orientation quaternion \(\mathbf{q}\):</p>
         <div class="formula-box">
-            \[ \vec{v}_{body} = R_{s2b} \cdot \vec{v}_{sensor} \]
+            \[ \vec{c}_0 = \text{Rotate}(\mathbf{q}, [1, 0, 0]^T) \]
+            \[ \vec{c}_1 = \text{Rotate}(\mathbf{q}, [0, 1, 0]^T) \]
+            \[ \vec{c}_2 = \text{Rotate}(\mathbf{q}, [0, 0, 1]^T) \]
         </div>
-        <p>For a valid coordinate transformation, \(R_{s2b}\) must be an <strong>Orthogonal Matrix</strong> with a determinant of <strong>+1</strong>. This ensures that the transformation is a pure rotation and does not involve reflection.</p>
+        <p>These vectors \(\vec{c}_0, \vec{c}_1, \vec{c}_2\) form the columns of the 3x3 rotation matrix \(R_{final}\). Each column tells you where a specific sensor axis points in the body frame.</p>
 
-        <h3>B. Guaranteeing Right-Handedness</h3>
-        <p>A common mistake in IMU calibration is manually "swapping" axes (e.g., \(z_{body} = y_{sensor}\)). If this swap is not carefully chosen, it can result in a <strong>Left-Handed</strong> coordinate system (\(\det(R) = -1\)).</p>
+        <h3>B. Automatic Rotation Decomposition</h3>
+        <p>To make calibration easier to manage, the tool automatically decomposes the final mounting matrix \(R_{final}\) into two distinct components:</p>
+        <div class="formula-box">
+            \[ R_{final} = R_{rough} \times R_{precise} \]
+        </div>
+
+        <h4>1. Rough Calibration (\(R_{rough}\))</h4>
+        <p>This represents the **cardinal alignment** (the 90-degree axis swaps and flips). It is found by identifying the dominant body axis for each sensor basis vector:</p>
         <ul>
-            <li><strong>Accelerometer Impact:</strong> Vector signs are flipped, causing incorrect tilt estimation.</li>
-            <li><strong>Gyroscope Impact:</strong> Rotational logic is inverted. A positive rotation around the sensor axis becomes a negative rotation in the body frame, causing feedback loops (like PID controllers) to diverge and fail.</li>
+            <li>Find the component of \(\vec{c}_0\) with the maximum absolute value. Set that as the primary axis of \(\vec{r}_0\) with a magnitude of \(\pm 1\).</li>
+            <li>Repeat for \(\vec{c}_1\) (ensuring a different axis is chosen).</li>
+            <li>Calculate \(\vec{r}_2 = \vec{r}_0 \times \vec{r}_1\) to ensure a right-handed system.</li>
         </ul>
-        <p>By using <strong>Quaternions</strong> to derive the rotation matrix, right-handedness is mathematically guaranteed. A unit quaternion always represents a valid rotation in \(SO(3)\).</p>
 
-        <h3>C. Using the Simulation as a Calibration Rig</h3>
-        <p>The provided simulation tool allows for empirical identification of the \(R_{s2b}\) matrix:</p>
+        <h4>2. Precise Calibration (\(R_{precise}\))</h4>
+        <p>This represents the **residual error** or fine-tuning (e.g., a 1.5-degree mounting tilt). Since \(R_{rough}\) is an orthogonal matrix, its inverse is its transpose. We calculate the residual as:</p>
+        <div class="formula-box">
+            \[ R_{precise} = R_{rough}^T \times R_{final} \]
+        </div>
+        <p>This separation allows engineers to distinguish between "intended mounting" (Rough) and "mounting tolerances" (Precise).</p>
+
+        <h3>C. Optimized Vector Rotation Formula</h3>
+        <p>To perform these rotations efficiently on embedded hardware, the library avoids the standard quaternion multiplication \(\mathbf{q}\mathbf{v}\mathbf{q}^{-1}\) (24 multiplications) and uses a vector-optimized identity:</p>
+        <div class="formula-box">
+            \[ \vec{v}' = \vec{v} + 2\vec{q}_{xyz} \times (\vec{q}_{xyz} \times \vec{v} + w\vec{v}) \]
+        </div>
+        <p>This formula requires only 15 multiplications and 12 additions, providing a significant performance boost in the IMU data processing pipeline.</p>
+
+        <h2>6. From User Input to Quaternions</h2>
+        <p>When a user inputs Euler angles (Roll, Pitch, Yaw), the library converts them into a unit quaternion \(\mathbf{q}\). It is important to note that the sensor's position \((x, y, z)\) does not affect the orientation math; it only shifts the origin of the transformation.</p>
+
+        <h3>A. The ZYX Convention</h3>
+        <p>We use the **ZYX intrinsic rotation convention** (also known as the 3-2-1 sequence), which is the standard in aerospace and navigation. The rotation is performed in the following order:</p>
         <ol>
-            <li><strong>Visual Alignment:</strong> Align the virtual "Sensor" box with the physical mounting on your vehicle using the keyboard controls.</li>
-            <li><strong>Matrix Generation:</strong> The tool calculates the 3x3 matrix by rotating the unit basis vectors \(\hat{i}, \hat{j}, \hat{k}\) through the mounting quaternion.</li>
-            <li><strong>Export:</strong> Saving the configuration generates a text file with the precise matrix coefficients needed for your firmware's "Rough Calibration" layer.</li>
+            <li><strong>Yaw (\(\psi\)):</strong> Rotation around the Z-axis.</li>
+            <li><strong>Pitch (\(\theta\)):</strong> Rotation around the new Y-axis.</li>
+            <li><strong>Roll (\(\phi\)):</strong> Rotation around the new X-axis.</li>
         </ol>
+
+        <h3>B. Conversion Formula</h3>
+        <p>Given the angles in radians, the components of the quaternion \(\mathbf{q} = [w, x, y, z]\) are calculated as follows:</p>
+        <div class="formula-box">
+            \[ w = \cos\frac{\phi}{2}\cos\frac{\theta}{2}\cos\frac{\psi}{2} + \sin\frac{\phi}{2}\sin\frac{\theta}{2}\sin\frac{\psi}{2} \]
+            \[ x = \sin\frac{\phi}{2}\cos\frac{\theta}{2}\cos\frac{\psi}{2} - \cos\frac{\phi}{2}\sin\frac{\theta}{2}\sin\frac{\psi}{2} \]
+            \[ y = \cos\frac{\phi}{2}\sin\frac{\theta}{2}\cos\frac{\psi}{2} + \sin\frac{\phi}{2}\cos\frac{\theta}{2}\sin\frac{\psi}{2} \]
+            \[ z = \cos\frac{\phi}{2}\cos\frac{\theta}{2}\sin\frac{\psi}{2} - \sin\frac{\phi}{2}\sin\frac{\theta}{2}\cos\frac{\psi}{2} \]
+        </div>
+
+        <h3>C. Common Orientation Examples</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Orientation</th>
+                    <th>Roll, Pitch, Yaw</th>
+                    <th>Quaternion \([w, x, y, z]\)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Identity (Default)</td>
+                    <td>\(0^\circ, 0^\circ, 0^\circ\)</td>
+                    <td>\([1.0, 0.0, 0.0, 0.0]\)</td>
+                </tr>
+                <tr>
+                    <td>90° Yaw (Left Turn)</td>
+                    <td>\(0^\circ, 0^\circ, 90^\circ\)</td>
+                    <td>\([0.707, 0.0, 0.0, 0.707]\)</td>
+                </tr>
+                <tr>
+                    <td>180° Roll (Inverted)</td>
+                    <td>\(180^\circ, 0^\circ, 0^\circ\)</td>
+                    <td>\([0.0, 1.0, 0.0, 0.0]\)</td>
+                </tr>
+                <tr>
+                    <td>90° Pitch (Nose Up)</td>
+                    <td>\(0^\circ, 90^\circ, 0^\circ\)</td>
+                    <td>\([0.707, 0.0, 0.707, 0.0]\)</td>
+                </tr>
+            </tbody>
+        </table>
+        <p>Every resulting quaternion is normalized such that \(w^2 + x^2 + y^2 + z^2 = 1\), ensuring it represents a valid rotation in 3D space.</p>
+
+        <div class="highlight">
+            <strong>Conclusion:</strong> While Euler angles are better for UI display, Quaternions are the mathematically superior choice for internal estimation and control loops, especially when optimized for the underlying hardware architecture.
+        </div>
     </div>
 </body>
 </html>
+
 

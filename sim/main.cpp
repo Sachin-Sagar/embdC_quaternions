@@ -204,6 +204,7 @@ int main() {
     euler_t current_euler = {0.0f, 0.0f, 0.0f};
     vec3_t imu_pos = {0.0f, 0.0f, 0.5f};
     euler_t imu_euler = {0.0f, 0.0f, 0.0f};
+    bool isLeftHanded = false;
 
     LoadConfig(imu_pos, imu_euler);
 
@@ -259,6 +260,9 @@ int main() {
             if (IsKeyDown(keys.imuYawRight)) { imu_euler.yaw -= 0.02f;   inputs[5].SetValue(imu_euler.yaw * RAD2DEG); }
             if (IsKeyDown(keys.imuRollLeft)) { imu_euler.roll += 0.02f;  inputs[3].SetValue(imu_euler.roll * RAD2DEG); }
             if (IsKeyDown(keys.imuRollRight)){ imu_euler.roll -= 0.02f;  inputs[3].SetValue(imu_euler.roll * RAD2DEG); }
+
+            // Handedness Toggle (Tab key)
+            if (IsKeyPressed(KEY_TAB)) isLeftHanded = !isLeftHanded;
         } else {
             imu_pos.x = inputs[0].GetValue();
             imu_pos.y = inputs[1].GetValue();
@@ -275,17 +279,28 @@ int main() {
             inputs[3].SetValue(imu_euler.roll * RAD2DEG); inputs[4].SetValue(imu_euler.pitch * RAD2DEG); inputs[5].SetValue(imu_euler.yaw * RAD2DEG);
         }
         if (IsKeyPressed(keys.resetAll)) {
-            current_euler = {0,0,0}; imu_pos = {0,0,0.5f}; imu_euler = {0,0,0};
+            current_euler = {0,0,0}; imu_pos = {0,0,0.5f}; imu_euler = {0,0,0}; isLeftHanded = false;
             inputs[0].SetValue(imu_pos.x); inputs[1].SetValue(imu_pos.y); inputs[2].SetValue(imu_pos.z);
             inputs[3].SetValue(imu_euler.roll * RAD2DEG); inputs[4].SetValue(imu_euler.pitch * RAD2DEG); inputs[5].SetValue(imu_euler.yaw * RAD2DEG);
         }
         quat_t body_quat = quat_from_euler(current_euler);
-        quat_t sensor_to_body = quat_from_euler(imu_euler);
+        quat_t sensor_to_body_rot = quat_from_euler(imu_euler);
 
         // --- AUTOMATIC DECOMPOSITION ---
-        vec3_t c0 = quat_rotate_vec3(sensor_to_body, {1, 0, 0});
-        vec3_t c1 = quat_rotate_vec3(sensor_to_body, {0, 1, 0});
-        vec3_t c2 = quat_rotate_vec3(sensor_to_body, {0, 0, 1});
+        // Basis vectors of the sensor frame (Right-Handed version first)
+        vec3_t c0 = quat_rotate_vec3(sensor_to_body_rot, {1, 0, 0});
+        vec3_t c1 = quat_rotate_vec3(sensor_to_body_rot, {0, 1, 0});
+        vec3_t c2 = quat_rotate_vec3(sensor_to_body_rot, {0, 0, 1});
+
+        // If sensor is Left-Handed, we must apply a reflection matrix M first.
+        // v_body = R_rot * M * v_sensor_LH
+        // This means the columns of the final transformation are R_rot * columns of M.
+        // diag(1, 1, -1) mirrors Z. So c2 becomes -c2.
+        if (isLeftHanded) {
+            c2.x = -c2.x;
+            c2.y = -c2.y;
+            c2.z = -c2.z;
+        }
 
         auto GetRoughAxis = [](vec3_t v) {
             vec3_t r = {0,0,0};
@@ -299,7 +314,7 @@ int main() {
         vec3_t c1_fix = c1; 
         if (r0.x != 0) c1_fix.x = 0; else if (r0.y != 0) c1_fix.y = 0; else c1_fix.z = 0;
         vec3_t r1 = GetRoughAxis(c1_fix);
-        vec3_t r2 = vec3_cross(r0, r1);
+        vec3_t r2 = vec3_cross(r0, r1); // Ensure RH body frame
 
         vec3_t p0 = { vec3_dot(r0, c0), vec3_dot(r0, c1), vec3_dot(r0, c2) };
         vec3_t p1 = { vec3_dot(r1, c0), vec3_dot(r1, c1), vec3_dot(r1, c2) };
@@ -326,11 +341,14 @@ int main() {
 
                     rlPushMatrix();
                         rlTranslatef(imu_pos.x, imu_pos.y, imu_pos.z);
-                        Quaternion ray_sensor_quat = ToRayQuat(sensor_to_body);
+                        Quaternion ray_sensor_quat = ToRayQuat(sensor_to_body_rot);
                         QuaternionToAxisAngle(ray_sensor_quat, &axis, &angle);
                         rlRotatef(angle * RAD2DEG, axis.x, axis.y, axis.z);
                         DrawCubeV({0,0,0}, {0.5f, 0.5f, 0.2f}, ORANGE);
-                        DrawLine3D({0,0,0}, {1,0,0}, RED); DrawLine3D({0,0,0}, {0,1,0}, GREEN); DrawLine3D({0,0,0}, {0,0,1}, BLUE);
+                        DrawLine3D({0,0,0}, {1,0,0}, RED); DrawLine3D({0,0,0}, {0,1,0}, GREEN); 
+                        // Visualizing the sensor's Z axis based on handedness
+                        if (isLeftHanded) DrawLine3D({0,0,0}, {0,0,-1}, BLUE);
+                        else DrawLine3D({0,0,0}, {0,0,1}, BLUE);
                     rlPopMatrix();
                 rlPopMatrix();
             EndMode3D();
@@ -341,28 +359,43 @@ int main() {
             DrawRectangle(config.renderWidth, 0, config.sidebarWidth, screenHeight, Fade(SKYBLUE, 0.1f));
             DrawLine(config.renderWidth, 0, config.renderWidth, screenHeight, BLUE);
 
+            // --- DYNAMIC UI LAYOUT FRAMEWORK ---
             float xPos = config.renderWidth + (20 * uiScale);
-            float yPos = 20 * uiScale;
-            MyDrawText("IMU CALIBRATION RIG", xPos, yPos, 24, DARKBLUE);
+            float curY = 20 * uiScale;
+            auto NextY = [&](float gap) { float p = curY; curY += gap * uiScale; return p; };
 
-            yPos += 40 * uiScale;
-            MyDrawText("BODY EULER [deg]:", xPos, yPos, 18, BLACK);
-            MyDrawText(TextFormat("R:%.1f, P:%.1f, Y:%.1f", current_euler.roll*RAD2DEG, current_euler.pitch*RAD2DEG, current_euler.yaw*RAD2DEG), xPos + (10 * uiScale), yPos += (22 * uiScale), 20, DARKGRAY);
+            MyDrawText("IMU CALIBRATION RIG", xPos, NextY(40), 24, DARKBLUE);
 
-            yPos += 30 * uiScale;
-            MyDrawText("KEYBOARD SHORTCUTS:", xPos, yPos, 18, BLACK);
-            MyDrawText("- Move IMU: I/K, J/L, U/O", xPos + (10 * uiScale), yPos += (20 * uiScale), 16, DARKGRAY);
-            MyDrawText("- Rotate IMU: T/G, F/H, V/B", xPos + (10 * uiScale), yPos += (20 * uiScale), 16, DARKGRAY);
-            MyDrawText("- Body: W/S, A/D, Q/E", xPos + (10 * uiScale), yPos += (20 * uiScale), 16, DARKGRAY);
-            MyDrawText("- [P] Save | [C] Load | [R] Reset", xPos + (10 * uiScale), yPos += (20 * uiScale), 16, MAROON);
+            MyDrawText("BODY EULER [deg]:", xPos, NextY(22), 18, BLACK);
+            MyDrawText(TextFormat("R:%.1f, P:%.1f, Y:%.1f", current_euler.roll*RAD2DEG, current_euler.pitch*RAD2DEG, current_euler.yaw*RAD2DEG), xPos + (10 * uiScale), NextY(35), 20, DARKGRAY);
 
-            yPos += 25 * uiScale;
-            MyDrawText("FINAL MOUNTING ORIENTATION:", xPos, yPos, 18, BLACK);
-            yPos += 30 * uiScale; // Increased from 20 to prevent label overlap
-            for (auto& input : inputs) { input.Draw(); }
+            MyDrawText("KEYBOARD SHORTCUTS:", xPos, NextY(20), 18, BLACK);
+            MyDrawText("- Move IMU: I/K, J/L, U/O", xPos + (10 * uiScale), NextY(20), 16, DARKGRAY);
+            MyDrawText("- Rotate IMU: T/G, F/H, V/B", xPos + (10 * uiScale), NextY(20), 16, DARKGRAY);
+            MyDrawText("- Body: W/S, A/D, Q/E", xPos + (10 * uiScale), NextY(20), 16, DARKGRAY);
+            MyDrawText("- [TAB] Toggle Handedness", xPos + (10 * uiScale), NextY(20), 16, BLACK);
+            MyDrawText("- [P] Save | [C] Load | [R] Reset", xPos + (10 * uiScale), NextY(35), 16, MAROON);
 
-            yPos = screenHeight - (245 * uiScale); 
-            MyDrawText("CALIBRATION DECOMPOSITION:", xPos, yPos, 18, MAROON);
+            MyDrawText("SENSOR PROPERTIES:", xPos, NextY(25), 18, BLACK);
+            float handY = NextY(30);
+            MyDrawText("Handedness:", xPos + (10 * uiScale), handY, 16, DARKGRAY);
+            DrawRectangleLinesEx({xPos + (110 * uiScale), handY - (2 * uiScale), 80 * uiScale, 20 * uiScale}, 1, BLUE);
+            MyDrawText(isLeftHanded ? "LEFT" : "RIGHT", xPos + (125 * uiScale), handY, 16, isLeftHanded ? RED : GREEN);
+
+            MyDrawText("MOUNTING ORIENTATION:", xPos, NextY(30), 18, BLACK);
+            float gridStartY = NextY(0);
+            for (int row = 0; row < 2; row++) {
+                for (int col = 0; col < 3; col++) {
+                    int i = row * 3 + col;
+                    inputs[i].rect.x = config.renderWidth + (15 * uiScale) + col * spacingX;
+                    inputs[i].rect.y = gridStartY + row * spacingY;
+                    inputs[i].Draw();
+                }
+            }
+            curY = gridStartY + (2 * spacingY) + (10 * uiScale); // Update curY after the grid
+
+            float decompY = screenHeight - (245 * uiScale); 
+            MyDrawText("CALIBRATION DECOMPOSITION:", xPos, decompY, 18, MAROON);
             
             auto DrawMat = [&](vec3_t v0, vec3_t v1, vec3_t v2, const char* label, float& yp) {
                 MyDrawText(label, xPos + (5 * uiScale), yp += (22 * uiScale), 15, DARKBLUE);
@@ -371,9 +404,9 @@ int main() {
                 MyDrawText(TextFormat("[ %.2f  %.2f  %.2f ]", v0.z, v1.z, v2.z), xPos + (10 * uiScale), yp += (18 * uiScale), 18, BLACK);
             };
 
-            DrawMat(r0, r1, r2, "R_rough (Cardinal Alignment):", yPos);
-            DrawMat(p0, p1, p2, "R_precise (Residual Error):", yPos);
-            DrawMat(c0, c1, c2, "R_final (Total Mounting):", yPos);
+            DrawMat(r0, r1, r2, "R_rough (Cardinal Alignment):", decompY);
+            DrawMat(p0, p1, p2, "R_precise (Residual Error):", decompY);
+            DrawMat(c0, c1, c2, "R_final (Total Mounting):", decompY);
 
         EndDrawing();
     }
